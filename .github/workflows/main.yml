@@ -5,7 +5,7 @@ name: Scrape and Build EPUB
 on:
   # 允许你手动在 Actions 页面点击按钮来运行
   workflow_dispatch:
-
+  
   # 定时触发：使用 CRON 表达式
   # 下面的表达式表示在每个月的1号的凌晨5点 (UTC时间) 自动运行
   # 你可以根据需求修改，或者注释掉这行如果你只想手动运行
@@ -22,14 +22,14 @@ jobs:
     # 第一步：'检出'代码
     # 作用：将你的仓库代码下载到云端电脑上，这样才能运行 scraper.py
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4 # <-- 这里没有变化，但保持最新为佳
 
     # 第二步：设置 Python 环境
     # 作用：安装 Python 软件
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5 # <-- 这里没有变化，但保持最新为佳
       with:
-        python-version: '3.10' # 使用 Python 3.10 版本
+        python-version: '3.10'
 
     # 第三步：安装依赖库
     # 作用：根据 requirements.txt 文件，安装我们程序需要的所有工具
@@ -37,7 +37,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-
+    
     # 第四步：运行爬虫脚本
     # 作用：执行我们的核心程序来抓取文章并生成 EPUB 文件
     - name: Run scraper to generate EPUB
@@ -46,7 +46,7 @@ jobs:
     # 第五步：上传生成的 EPUB 文件
     # 作用：将生成的 'Selected_Articles.epub' 文件作为一个'产物'保存起来，方便你下载
     - name: Upload EPUB artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4 # <-- 这里是关键的修改，从 v3 更新到了 v4
       with:
         name: Ebook
         path: Selected_Articles.epub
