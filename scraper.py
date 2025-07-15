@@ -11,14 +11,16 @@ START_URL = "https://chentianyuzhou.com/category/%e7%b2%be%e9%80%89%e9%95%bf%e6%
 
 # 设置请求头，模拟浏览器访问
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7'
 }
 
 def get_article_urls(page_url):
     """获取单个页面上所有文章的链接"""
     urls = []
     try:
-        response = requests.get(page_url, headers=HEADERS)
+        response = requests.get(page_url, headers=HEADERS, timeout=15)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         article_links = soup.select('h2.entry-title a')
@@ -39,7 +41,7 @@ def get_all_urls():
         time.sleep(2) 
         
         try:
-            response = requests.get(current_url, headers=HEADERS)
+            response = requests.get(current_url, headers=HEADERS, timeout=15)
             response.raise_for_status()
             soup = BeautifulSoup(response.content, 'html.parser')
             
@@ -65,10 +67,10 @@ def get_all_urls():
     return list(reversed(all_urls))
 
 def get_article_content(article_url):
-    """获取单篇文章的标题和正文内容"""
+    """获取单篇文章的标题和正文内容 (使用更精细的提取逻辑)"""
     print(f"Fetching article: {article_url}")
     try:
-        response = requests.get(article_url, headers=HEADERS)
+        response = requests.get(article_url, headers=HEADERS, timeout=15)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
 
@@ -77,20 +79,35 @@ def get_article_content(article_url):
 
         content_div = soup.select_one('div.entry-content')
         
-        if content_div:
-            for element_to_remove in content_div.select('script, style, .sharedaddy, .jp-relatedposts'):
-                element_to_remove.decompose()
+        if not content_div:
+            print(f"Warning: Could not find content div for article: {title}")
+            return title, "<p>未能抓取到正文内容。</p>"
+
+        # 移除不需要的元素
+        for element_to_remove in content_div.select('script, style, .sharedaddy, .jp-relatedposts, .wp-block-spacer, .wp-block-embed, .wp-block-buttons'):
+            element_to_remove.decompose()
         
-        if content_div and content_div.find('iframe'):
+        # 过滤掉视频文章
+        if content_div.find('iframe'):
              print(f"Skipping video article: {title}")
              return None, None
         
-        content_html = str(content_div) if content_div else ""
+        # 精细化提取内容：只选择我们需要的标签
+        # 这可以确保只保留文章段落、标题、列表、图片等核心内容
+        content_tags = content_div.find_all(['p', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'ul', 'ol', 'li', 'figure', 'pre'])
+        
+        if not content_tags:
+            print(f"Warning: Content div for '{title}' was found but no content tags (p, h2, etc.) were inside.")
+            return title, "<p>未能抓取到正文内容。</p>"
+        
+        # 将所有找到的标签拼接成最终的 HTML 内容
+        content_html = ''.join(str(tag) for tag in content_tags)
         
         return title, content_html
+
     except requests.exceptions.RequestException as e:
         print(f"Error fetching article content from {article_url}: {e}")
-        return None, None
+        return "Fetch Error", f"<p>抓取文章时出错: {e}</p>"
 
 def create_epub(articles):
     """根据文章内容创建EPUB文件"""
@@ -102,27 +119,24 @@ def create_epub(articles):
     book.add_author('chentianyuzhou.com')
 
     chapters = []
-    table_of_contents = []
-
     for i, article in enumerate(articles):
         title = article['title']
         content_html = article['content']
         safe_title = re.sub(r'[\\/*?:"<>|]', "", title)
-        file_name = f'chap_{i+1}_{safe_title}.xhtml'
+        file_name = f'chap_{i+1}_{safe_title[:50]}.xhtml' # 限制文件名长度
         
         chapter = epub.EpubHtml(title=title, file_name=file_name, lang='zh')
         chapter.content = f'<h1>{title}</h1>{content_html}'
         book.add_item(chapter)
         chapters.append(chapter)
-        table_of_contents.append(epub.Link(file_name, title, f'chap_{i+1}'))
         print(f"Added to EPUB: {title}")
 
-    book.toc = tuple(table_of_contents)
+    book.toc = [(epub.Link(c.file_name, c.title, f'chap_{i}'), ()) for i, c in enumerate(chapters)]
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
     book.spine = ['nav'] + chapters
     epub.write_epub('Selected_Articles.epub', book, {})
-    print("\nEPUB file 'Selected_Articles.epub' created successfully!")
+    print(f"\nEPUB file 'Selected_Articles.epub' created with {len(articles)} articles.")
 
 def create_placeholder_epub():
     """当未找到文章时，创建一个占位符EPUB"""
@@ -131,46 +145,5 @@ def create_placeholder_epub():
     book.set_title('精选长文 - 未找到文章')
     book.set_language('zh')
     book.add_author('Scraper Bot')
-
     chapter = epub.EpubHtml(title='执行报告', file_name='report.xhtml', lang='zh')
-    chapter.content = """
-    <h1>未找到新文章</h1>
-    <p>本次运行未能抓取到任何有效的非视频文章。</p>
-    <p>可能的原因包括：</p>
-    <ul>
-        <li>网站“精选长文”分类下当前没有文章。</li>
-        <li>所有文章都被识别为视频内容而被跳过。</li>
-        <li>网站结构发生变化，导致爬虫无法识别内容。</li>
-    </ul>
-    <p>此文件为自动生成的占位符，以确保自动化流程能够成功完成。</p>
-    """
-    book.add_item(chapter)
 
-    book.toc = (epub.Link('report.xhtml', '执行报告', 'report'),)
-    book.add_item(epub.EpubNcx())
-    book.add_item(epub.EpubNav())
-    book.spine = ['nav', chapter]
-    epub.write_epub('Selected_Articles.epub', book, {})
-    print("\nNo articles found. A placeholder EPUB 'Selected_Articles.epub' was created.")
-
-
-if __name__ == '__main__':
-    all_article_urls = get_all_urls()
-    
-    articles_data = []
-    if not all_article_urls:
-        print("No article URLs found during crawl.")
-    else:
-        print(f"\nFound {len(all_article_urls)} article URLs. Fetching content...")
-        for url in all_article_urls:
-            time.sleep(2) 
-            title, content = get_article_content(url)
-            if title and content:
-                articles_data.append({'title': title, 'content': content})
-
-    if articles_data:
-        print(f"Successfully fetched content for {len(articles_data)} articles.")
-        create_epub(articles_data)
-    else:
-        print("No valid article content was fetched. Creating a placeholder EPUB.")
-        create_placeholder_epub()
